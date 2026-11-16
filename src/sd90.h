@@ -95,7 +95,7 @@ struct KoaTone {
     uint16_t wavIdL = 0, wavIdR = 0;   // 1-based InternalA wave numbers
     uint8_t waveGain = 1;       // 0=-6dB, 1=0dB, 2=+6dB, 3=+12dB
     uint8_t fxmSwitch = 0, fxmColor = 0, fxmDepth = 0, tempoSync = 0;
-    uint8_t pitchKeyfollow = 64;
+    uint8_t pitchKeyfollow = 74; // 64 = 0%, 74 = +100% (10%/step)
     uint8_t pitchEnvDepth = 64, pitchEnvVelSens = 64;
     uint8_t pitchEnvT1VelSens = 64, pitchEnvT4VelSens = 64, pitchEnvTimeKF = 64;
     uint8_t pitchEnvT[4] = {0, 0, 0, 0};
@@ -128,6 +128,9 @@ struct KoaTone {
     uint8_t velLow = 1, velHigh = 127;
 
     bool active() const { return wavGroupType != 0 && wavIdL != 0; }
+    double pitchKeyfollowRatio() const {
+        return (int(pitchKeyfollow) - 64) * 0.1;
+    }
     double pitchRatio() const {
         return pow(2.0, (int(coarse) - 64) / 12.0 + (int(fine) - 64) / 1200.0);
     }

@@ -304,8 +304,9 @@ bool Rom::loadInternalAFromDll(const char* pePath) {
         w.velLayer = lm & 0x1F;
         w.rootKey = (float)e[2];
         w.keyLow = e[3];
-        uint16_t fineRaw = le16(e + 8);
-        w.fineCents = (int(fineRaw) - 0x400) * 0.1f;
+        int fine1 = int(le16(e + 6)) - 0x400;
+        int fine2 = int(le16(e + 8)) - 0x400;
+        w.fineCents = float(fine1 + fine2) * 0.1f;
         uint16_t rateCode = le16(e + 10);
         w.rate = rateCode ? uint32_t(rateCode) * 100u : 32000u;
         if (w.rate < 8000 || w.rate > 192000) w.rate = 32000;
@@ -395,8 +396,9 @@ bool Rom::parseWaveTable() {
         w.velLayer = (b1 >> 3) & 0x1F;
         w.rootKey = (float)e[2];
         w.keyLow = e[3];
-        uint16_t fineRaw = be16(e + 8);
-        w.fineCents = (int(fineRaw) - 0x400) * 0.1f;
+        int fine1 = int(be16(e + 6)) - 0x400;
+        int fine2 = int(be16(e + 8)) - 0x400;
+        w.fineCents = float(fine1 + fine2) * 0.1f;
         uint16_t rate = be16(e + 10);
         w.rate = rate ? uint32_t(rate) * 100u : 32000u;
         if (w.rate < 8000 || w.rate > 192000) w.rate = 32000;
@@ -1243,8 +1245,12 @@ void Synth::startVoice(int part, int note, int vel, const Wave* w, const KoaTone
     else if (p.bankIndex >= 0 && p.bankIndex <= 10 && p.patchIndex < (int)banks_[p.bankIndex].patches.size())
         pt = &banks_[p.bankIndex].patches[p.patchIndex];
     const KoaTone* tone = toneOverride ? toneOverride : ((pt && part != 9) ? pt->firstActiveTone() : nullptr);
+    double keySemis = double(note) - w->rootKey;
+    if (tone && part != 9) {
+        keySemis = (60.0 + (double(note) - 60.0) * tone->pitchKeyfollowRatio()) - w->rootKey;
+    }
     double ratio = (part == 9) ? pow(2.0, w->fineCents / 1200.0)
-                               : pow(2.0, (note - w->rootKey) / 12.0 + w->fineCents / 1200.0);
+                               : pow(2.0, keySemis / 12.0 + w->fineCents / 1200.0);
     if (tone) ratio *= tone->pitchRatio();
     v->baseInc = ratio * double(w->rate) / sampleRate_;
     v->inc = v->baseInc * partTuneRatio(part);
