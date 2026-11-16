@@ -180,6 +180,20 @@ static void refreshUiSnapshot(PluginInstance* inst) {
     }
 }
 
+static void applyMasterTuneStep(PluginInstance* inst, double deltaHz, bool resetToDefault = false) {
+    if (!inst) return;
+    std::lock_guard<std::mutex> guard(inst->lock);
+    ensureInit(inst);
+    double next = 440.0;
+    if (!resetToDefault) {
+        double cur = inst->synth.masterTuneHz();
+        next = std::round((cur + deltaHz) * 10.0) / 10.0;
+        if (next < 400.0) next = 400.0;
+        if (next > 480.0) next = 480.0;
+    }
+    inst->synth.setMasterTuneHz(next);
+}
+
 static void handleEditorClick(HWND hwnd, PluginInstance* inst, int x, int y, UINT msg, WPARAM wp) {
     if (!inst) return;
     RECT rc{};
@@ -188,8 +202,17 @@ static void handleEditorClick(HWND hwnd, PluginInstance* inst, int x, int y, UIN
     if (W <= 0) return;
 
     bool changed = false;
-    // Header A4 badge click: x in [W-142, W-12], y in [6, 28]
-    if (y >= 6 && y <= 28 && x >= W - 142 && x <= W - 12) {
+    bool fineA4 = (msg == WM_RBUTTONDOWN) || ((wp & MK_SHIFT) != 0);
+    double stepA4 = fineA4 ? 0.1 : 1.0;
+
+    // Header A4 controls: [-] [A4: %.1f Hz] [+]
+    if (y >= 6 && y <= 28 && x >= W - 170 && x <= W - 150) {
+        applyMasterTuneStep(inst, -stepA4, msg == WM_MBUTTONDOWN);
+        changed = true;
+    } else if (y >= 6 && y <= 28 && x >= W - 32 && x <= W - 12) {
+        applyMasterTuneStep(inst, +stepA4, msg == WM_MBUTTONDOWN);
+        changed = true;
+    } else if (y >= 6 && y <= 28 && x >= W - 148 && x <= W - 34) {
         std::lock_guard<std::mutex> guard(inst->lock);
         ensureInit(inst);
         if (msg == WM_RBUTTONDOWN || msg == WM_MBUTTONDOWN) {
@@ -251,6 +274,27 @@ static LRESULT CALLBACK editorWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
     case WM_MBUTTONDOWN:
         handleEditorClick(hwnd, inst, int(short(LOWORD(lp))), int(short(HIWORD(lp))), msg, wp);
         return 0;
+    case WM_MOUSEWHEEL: {
+        if (inst) {
+            POINT pt{ int(short(LOWORD(lp))), int(short(HIWORD(lp))) };
+            ScreenToClient(hwnd, &pt);
+            RECT rc{};
+            GetClientRect(hwnd, &rc);
+            int W = rc.right - rc.left;
+            if (pt.y >= 0 && pt.y <= 34 && pt.x >= W - 170 && pt.x <= W - 12) {
+                int delta = int(short(HIWORD(wp)));
+                if (delta != 0) {
+                    bool fine = (LOWORD(wp) & MK_SHIFT) != 0;
+                    double step = (delta > 0 ? 1.0 : -1.0) * (fine ? 0.1 : 1.0);
+                    applyMasterTuneStep(inst, step);
+                    refreshUiSnapshot(inst);
+                    InvalidateRect(hwnd, nullptr, FALSE);
+                }
+                return 0;
+            }
+        }
+        return 0;
+    }
     case WM_ERASEBKGND:
         return 1;
     case WM_PAINT: {
@@ -299,19 +343,28 @@ static LRESULT CALLBACK editorWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
             inst ? inst->uiMasterParam * 200.0f : 80.0f);
         HGDIOBJ oldFont = SelectObject(memDC, hdrFont);
         SetTextColor(memDC, RGB(230, 238, 248));
-        RECT titleRc{ 12, 8, W - 148, 30 };
+        RECT titleRc{ 12, 8, W - 176, 30 };
         DrawTextA(memDC, title, -1, &titleRc, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
 
-        // A4 master tune clickable badge
+        // A4 master tune controls: [-] [A4: %.1f Hz] [+]
         double a4 = inst ? inst->uiMasterTuneHz : 440.0;
         bool a4Custom = std::fabs(a4 - 440.0) >= 0.05;
-        RECT a4Rc{ W - 142, 6, W - 12, 28 };
+        HBRUSH hdrBtnBrush = CreateSolidBrush(RGB(46, 54, 68));
+        RECT rA4Minus{ W - 170, 6, W - 150, 28 };
+        RECT a4Rc{ W - 148, 6, W - 34, 28 };
+        RECT rA4Plus{ W - 32, 6, W - 12, 28 };
+        FillRect(memDC, &rA4Minus, hdrBtnBrush);
+        FillRect(memDC, &rA4Plus, hdrBtnBrush);
+        DeleteObject(hdrBtnBrush);
         HBRUSH a4Brush = CreateSolidBrush(a4Custom ? RGB(64, 92, 130) : RGB(48, 56, 70));
         FillRect(memDC, &a4Rc, a4Brush);
         DeleteObject(a4Brush);
         char a4Str[32];
         std::snprintf(a4Str, sizeof(a4Str), "A4: %.1f Hz", a4);
         SelectObject(memDC, subFont);
+        SetTextColor(memDC, RGB(215, 225, 240));
+        DrawTextA(memDC, "-", -1, &rA4Minus, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+        DrawTextA(memDC, "+", -1, &rA4Plus, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
         SetTextColor(memDC, a4Custom ? RGB(255, 225, 135) : RGB(210, 222, 238));
         DrawTextA(memDC, a4Str, -1, &a4Rc, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
 

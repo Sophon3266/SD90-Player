@@ -1675,6 +1675,7 @@ void Synth::pitchBend(int ch, int val) {
 }
 
 void Synth::applyGsReset() {
+    masterTuneSemis_ = 0.0;
     for (int i = 0; i < 16; ++i) {
         float savedUserTune = parts_[i].userTuneSemis;
         parts_[i] = Part();
@@ -1704,6 +1705,12 @@ void Synth::setPartWave(int part, int waveId, int gain) {
 
 void Synth::sysEx(const uint8_t* data, int len) {
     if (len < 5) return;
+    auto applyRolandMasterTune = [&](const uint8_t* n) {
+        int val16 = ((n[0] & 0xF) << 12) | ((n[1] & 0xF) << 8) | ((n[2] & 0xF) << 4) | (n[3] & 0xF);
+        double cents = (val16 - 0x0400) * 0.1;
+        masterTuneSemis_ = cents / 100.0;
+        for (int ch = 0; ch < 16; ++ch) updatePartPitch(ch);
+    };
     // Roland SD-90 DT1: F0 41 <dev> 00 48 12 <aa> <bb> <cc> <dd> <payload...> <sum> F7
     if (useNativeSysex_ && len >= 12 && data[0] == 0xF0 && data[1] == 0x41 &&
         data[3] == 0x00 && data[4] == 0x48 && data[5] == 0x12) {
@@ -1711,6 +1718,18 @@ void Synth::sysEx(const uint8_t* data, int len) {
         const uint8_t* p = data + 10;
         int plen = len - 12; // exclude checksum + F7 (or trailing bytes)
         if (plen <= 0) return;
+
+        // 00 00 00 00: SD-90 Native Setup / Reset
+        if (a0 == 0x00 && a1 == 0x00 && a2 == 0x00 && a3 == 0x00 && plen >= 1) {
+            applyGsReset();
+            return;
+        }
+
+        // 01 00 00 00: SD-90 System Common Master Tune (4 nibbles, 0.1 cents/step, 0x0400 = 0)
+        if (a0 == 0x01 && a1 == 0x00 && a2 == 0x00 && a3 == 0x00 && plen >= 4) {
+            applyRolandMasterTune(p);
+            return;
+        }
 
         // 10 00 2p 00: Port A Part p Setup (MSB/LSB/PC/Level/Pan/Coarse/Fine)
         if (a0 == 0x10 && a1 == 0x00 && a2 >= 0x20 && a2 <= 0x2F && a3 == 0x00 && plen >= 11) {
@@ -1788,18 +1807,28 @@ void Synth::sysEx(const uint8_t* data, int len) {
         }
         return;
     }
-    // GM System On: F0 7E 7F 09 01 F7
-    if (len >= 6 && data[0] == 0xF0 && data[1] == 0x7E && data[3] == 0x09 && data[4] == 0x01) {
+    // GM System On / GM Off / GM2 System On: F0 7E <dev> 09 01/02/03 F7
+    if (len >= 6 && data[0] == 0xF0 && data[1] == 0x7E && data[3] == 0x09 &&
+        (data[4] == 0x01 || data[4] == 0x02 || data[4] == 0x03)) {
         applyGsReset();
         return;
     }
+    // XG System On: F0 43 <1n> 4C 00 00 7E 00 F7
+    if (len >= 9 && data[0] == 0xF0 && data[1] == 0x43 && (data[2] & 0xF0) == 0x10 &&
+        data[3] == 0x4C && data[4] == 0x00 && data[5] == 0x00 && data[6] == 0x7E && data[7] == 0x00) {
+        applyGsReset();
+        return;
+    }
+    // XG Master Tune: F0 43 <1n> 4C 00 00 00 n3 n2 n1 n0 F7
+    if (len >= 12 && data[0] == 0xF0 && data[1] == 0x43 && (data[2] & 0xF0) == 0x10 &&
+        data[3] == 0x4C && data[4] == 0x00 && data[5] == 0x00 && data[6] == 0x00) {
+        applyRolandMasterTune(data + 7);
+        return;
+    }
     // GS Master Tune: F0 41 <dev> 42 12 40 00 00 n3 n2 n1 n0 <sum> F7
-    if (len >= 15 && data[0] == 0xF0 && data[1] == 0x41 && data[3] == 0x42 &&
+    if (len >= 14 && data[0] == 0xF0 && data[1] == 0x41 && data[3] == 0x42 &&
         data[4] == 0x12 && data[5] == 0x40 && data[6] == 0x00 && data[7] == 0x00) {
-        int val16 = ((data[8] & 0xF) << 12) | ((data[9] & 0xF) << 8) | ((data[10] & 0xF) << 4) | (data[11] & 0xF);
-        double cents = (val16 - 0x0400) * 0.1;
-        masterTuneSemis_ = cents / 100.0;
-        for (int ch = 0; ch < 16; ++ch) updatePartPitch(ch);
+        applyRolandMasterTune(data + 8);
         return;
     }
     // GM2/Universal Master Fine Tuning: F0 7F 7F 04 03 lsb msb F7
