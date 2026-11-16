@@ -1,0 +1,35 @@
+# Third-party reference binaries, ROMs, and manuals (local only)
+/ref/
+/SD-90_OM.pdf
+/assets/
+
+# Build & release artifacts
+/build/
+/dist/
+*.dll
+*.exe
+*.o
+*.obj
+*.set
+
+# Local development docs, logs, analysis, scripts, and test corpus (not for public repo)
+/docs/
+/worklog/
+/test/
+/tools/
+/analysis/
+/.omp/
+/AGENTS.md
+
+# Audio renders & temporary files
+*.wav
+/_tmp*/
+*.tmp
+*.log
+
+# IDE / Python / OS
+.vscode/
+__pycache__/
+*.py[cod]
+Thumbs.db
+desktop.ini
